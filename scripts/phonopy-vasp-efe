@@ -100,6 +100,8 @@ def get_fe_ev_lines(args):
     volumes = []
     energy_sigma0 = []
     free_energies = []
+    entropies = []
+    heat_capacities = []
     temperatures = None
     for filename in args.filenames:
         vxml = read_vasprunxml(filename)
@@ -107,11 +109,13 @@ def get_fe_ev_lines(args):
         eigenvalues = vxml.eigenvalues[:, :, :, 0]
         n_electrons = vxml.NELECT
         energy = vxml.energies[-1, 1]
-        temps, fe = get_free_energy_at_T(args.tmin, args.tmax, args.tstep,
-                                         eigenvalues, weights, n_electrons)
+        temps, fe, S, Cv = get_free_energy_at_T(args.tmin, args.tmax, args.tstep,
+                                                eigenvalues, weights, n_electrons)
         volumes.append(vxml.volume[-1])
         energy_sigma0.append(energy)
         free_energies.append(energy - fe[0] + fe)
+        entropies.append(S)
+        heat_capacities.append(Cv)
         if temperatures is None:
             temperatures = temps
         else:
@@ -128,11 +132,25 @@ def get_fe_ev_lines(args):
     lines_ev += ["%20.8f %20.8f" % (v, e)
                  for v, e in zip(volumes, energy_sigma0)]
 
-    return lines_fe, lines_ev
+    lines_S = []
+    lines_S.append(("# volume:  " + " %15.8f" * len(volumes))
+                    % tuple(volumes))
+    lines_S.append("#    T(K)     Entropies (in kB unit)")
+    lines_S += get_free_energy_lines(temperatures,
+                                      np.transpose(entropies))
+
+    lines_Cv = []
+    lines_Cv.append(("# volume:  " + " %15.8f" * len(volumes))
+                   % tuple(volumes))
+    lines_Cv.append("#    T(K)     heat capacities (in kB unit)")
+    lines_Cv += get_free_energy_lines(temperatures,
+                                      np.transpose(heat_capacities))
+
+    return lines_fe, lines_ev, lines_S, lines_Cv
 
 
 def main(args):
-    lines_fe, lines_ev = get_fe_ev_lines(args)
+    lines_fe, lines_ev, lines_S, lines_Cv = get_fe_ev_lines(args)
 
     with open("fe-v.dat", 'w') as w:
         w.write("\n".join(lines_fe))
@@ -144,6 +162,15 @@ def main(args):
         w.write("\n")
         print("* energy (sigma->0) and volumes are written in \"e-v.dat\".")
 
+    with open("S-v.dat", 'w') as w:
+        w.write("\n".join(lines_S))
+        w.write("\n")
+        print("* Electronic entropies are written in \"S-v.dat\".")
+
+    with open("Cv-v.dat", 'w') as w:
+        w.write("\n".join(lines_Cv))
+        w.write("\n")
+        print("* Electronic heat capacities are written in \"Cv-v.dat\".")
 
 if __name__ == "__main__":
     main(get_options())

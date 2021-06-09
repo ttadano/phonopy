@@ -38,12 +38,16 @@ from phonopy.units import Kb
 
 def get_free_energy_at_T(tmin, tmax, tstep, eigenvalues, weights, n_electrons):
     free_energies = []
+    entropies = []
+    heat_capacities = []
     efe = ElectronFreeEnergy(eigenvalues, weights, n_electrons)
     temperatures = np.arange(tmin, tmax + 1e-8, tstep)
     for T in temperatures:
         efe.run(T)
         free_energies.append(efe.free_energy)
-    return temperatures, free_energies
+        entropies.append(efe.entropy)
+        heat_capacities.append(efe.heat_capacity)
+    return temperatures, free_energies, entropies, heat_capacities
 
 
 class ElectronFreeEnergy(object):
@@ -65,7 +69,7 @@ class ElectronFreeEnergy(object):
        f_i(V) = \left\{ 1 + \exp\left[\frac{\epsilon_i(V) - \mu(V)}{T}\right]
        \right\}^{-1}
 
-    where :math:`g` is 1 for non-spin polarized systems and 2 for spin
+    where :math:`g` is 2 for non-spin polarized systems and 1 for spin
     polarized systems.
 
     Energy
@@ -78,11 +82,13 @@ class ElectronFreeEnergy(object):
     Attributes
     ----------
     entropy: float
-        Entropy in eV (T * S).
+        Entropy in Kb unit.
     energy: float
         Energy in eV.
     free_energy: float
-        energy - entropy in eV.
+        energy - T * entropy in eV.
+    heat_capacity: float
+        constant volume electronic heat capacity in Kb unit.
     mu: float
         Chemical potential in eV.
 
@@ -126,6 +132,7 @@ class ElectronFreeEnergy(object):
         self.mu = None
         self.entropy = None
         self.energy = None
+        self.heat_capacity = None
 
     def run(self, T):
         """
@@ -145,10 +152,11 @@ class ElectronFreeEnergy(object):
         self._f = self._occupation_number(self._eigenvalues, self.mu)
         self.entropy = self._entropy()
         self.energy = self._energy()
+        self.heat_capacity = self._heat_capacity()
 
     @property
     def free_energy(self):
-        return self.energy - self.entropy
+        return self.energy - self._T * self.entropy
 
     def _entropy(self):
         S = 0
@@ -156,12 +164,18 @@ class ElectronFreeEnergy(object):
                           self._weights):
             _f = np.extract((f_k > 1e-12) * (f_k < 1 - 1e-12), f_k)
             S -= (_f * np.log(_f) + (1 - _f) * np.log(1 - _f)).sum() * w
-        return S * self._g * self._T / self._weights.sum()
+        return S * self._g / self._weights.sum()
 
     def _energy(self):
         occ_eigvals = self._f * self._eigenvalues
         return np.dot(
             occ_eigvals.reshape(len(self._weights), -1).sum(axis=1),
+            self._weights) * self._g / self._weights.sum()
+
+    def _heat_capacity(self):
+        integrand = ((self._eigenvalues - self.mu) / self._T)**2 * self._f * (1.0 - self._f)
+        return np.dot(
+            integrand.reshape(len(self._weights), -1).sum(axis=1),
             self._weights) * self._g / self._weights.sum()
 
     def _chemical_potential(self):
